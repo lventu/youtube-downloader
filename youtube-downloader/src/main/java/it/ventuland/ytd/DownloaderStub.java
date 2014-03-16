@@ -13,21 +13,23 @@ public class DownloaderStub {
 	private ExecutorService dnlThreadExecutor = null; 
 	private UrlList mDnlList = null;
 	private DownloaderListener mEventListener = null;
+	private boolean mIsDebug;
 	
-	public DownloaderStub(UrlList pDnlList, DownloaderListener pEventListener) {
-		initialize(pDnlList, pEventListener);
+	public DownloaderStub(UrlList pDnlList, DownloaderListener pEventListener, boolean pIsDebug) {
+		initialize(pDnlList, pEventListener, pIsDebug);
 	}
 	
-	protected void initialize(UrlList pDnlList, DownloaderListener pEventListener) {
+	protected void initialize(UrlList pDnlList, DownloaderListener pEventListener, boolean pIsDebug) {
 		dnlThreadExecutor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 		
 		mDnlList = pDnlList;
 		mEventListener = pEventListener;
+		mIsDebug = pIsDebug;
 	}
 
 	public void startAll(){
 		for(int i = 0; i<THREAD_POOL_SIZE; i++){
-			YTDownloadThread lThread = new YTDownloadThread(mDnlList);
+			YTDownloadThread lThread = new YTDownloadThread(mDnlList, mIsDebug);
 			lThread.addDownloadListener(mEventListener);
 			dnlThreadExecutor.execute(lThread);
 		}

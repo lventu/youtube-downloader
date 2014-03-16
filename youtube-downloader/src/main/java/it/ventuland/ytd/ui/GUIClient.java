@@ -34,15 +34,13 @@ import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.dnd.DropTarget;
-import java.awt.dnd.DropTargetDragEvent;
+import java.awt.dnd.DropTargetAdapter;
 import java.awt.dnd.DropTargetDropEvent;
-import java.awt.dnd.DropTargetEvent;
-import java.awt.dnd.DropTargetListener;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentEvent;
+import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.awt.event.WindowListener;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
@@ -50,8 +48,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.util.Enumeration;
+import java.util.List;
 import java.util.regex.Pattern;
 
+import javax.swing.AbstractButton;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
@@ -70,15 +71,13 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
-import javax.swing.event.ChangeEvent;
-import javax.swing.event.ChangeListener;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
+import org.apache.commons.configuration.Configuration;
 
-public class GUIClient extends JFrame implements ActionListener, WindowListener, DocumentListener, ChangeListener, DropTargetListener {
 
-	public static final String szVersion = "V20131210_0613e by MrKnödelmann";
+public class GUIClient extends JFrame {
 
 	private static final long serialVersionUID = 6791957129816930254L;
 
@@ -86,17 +85,15 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 
 	// more or less (internal) output
 	// set to True or add 'd' after mod-time
-	private static boolean bDEBUG = GUIClient.szVersion.matches("V[0-9]+_[0-9]+d.*");
+	private static boolean mIsDebug = false;
 
 	// just report file size of HTTP header - don't download binary data (the video)
-	private static boolean bNODOWNLOAD = bDEBUG;
+	private static boolean bNODOWNLOAD = mIsDebug;
 
 	// save diskspace - try to download e.g. 720p before 1080p if HD is set
 	public static boolean bSaveDiskSpace = false;
 
 	private static String sproxy = null;
-
-	public static String szDLSTATE = "downloading ";
 
 	// RFC-1123 ? hostname [with protocol]	
 	public static final String szPROXYREGEX = "(^((H|h)(T|t)(T|t)(P|p)(S|s)?://)?([a-zA-Z0-9]+:[a-zA-Z0-9]+@)?([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])(\\.([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9]))*(:[0-90-90-90-9]{1,4})?$)|()";
@@ -119,34 +116,235 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 	JButton directorybutton = null;
 	JTextField directorytextfield = null;
 	static JTextField textinputfield = null;
-	static JRadioButton hdbutton = null;
-	static JRadioButton stdbutton = null;
-	static JRadioButton ldbutton = null;
-	static JRadioButton mpgbutton = null;
-	static JRadioButton flvbutton = null;
-	static JRadioButton webmbutton = null;
-	JCheckBox saveconfigcheckbox = null;
+	
+	static ButtonGroup mVideoResolutionBtnGrp;
+	static ButtonGroup mVideoFormatBtnGrp;
 	static JCheckBox save3dcheckbox = null;
-
-	UrlList mUrlQueue = null;
-	DownloaderStub downloadExecutor = null;
-	IConfiguration mConfiguration = null;
+//	private JRadioButton hdbutton = null;
+//	private JRadioButton stdbutton = null;
+//	private JRadioButton ldbutton = null;
+//	private JRadioButton mpgbutton = null;
+//	private JRadioButton flvbutton = null;
+//	private JRadioButton webmbutton = null;
+	
+	JCheckBox saveconfigcheckbox = null;
 
 	private DefaultListModel<String> dlm = null;
+	private UrlList mUrlQueue = null;
+	private DownloaderStub downloadExecutor = null;
+	private Configuration mAppConfig = null;
+	private IConfiguration mConfiguration = null;
 
-	enum eCLIdownloadQuality { LD, SD, HD} ;
-	static eCLIdownloadQuality CLIdownloadQuality ;
-	enum eCLIdownloadFormat { MPG, WEBM, FLV };
-	static eCLIdownloadFormat CLIdownloadFormat; 
-
-	public GUIClient( ) {
-		initialize();
+	
+	public static synchronized Boolean getbQuitrequested() {
+		return bQuitrequested;
 	}
 
-	protected void initialize() {
+	public static synchronized String getProxy() {
+		return sproxy;
+	}
+
+	public synchronized static void setbQuitrequested(Boolean bQuitrequested) {
+		GUIClient.bQuitrequested = bQuitrequested;
+	}
+
+	/**
+	 * get state of downloadbutton as Integer 
+	 * 
+	 * @return
+	 */
+	public synchronized static Integer getIdlbuttonstate() {
+		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
+		int lRet = 0;
+		while(e.hasMoreElements()){
+			JRadioButton lRb = (JRadioButton) e;
+			String lActionCommand = lRb.getActionCommand();
+			if("hd".equals(lActionCommand) && lRb.isSelected() ){
+				lRet += 4;
+			}else if("std".equals(lActionCommand) && lRb.isSelected() ){
+				lRet += 2;
+			}else if("ld".equals(lActionCommand) && lRb.isSelected() ){
+				lRet += 1;
+			}
+		}
+		return Integer.valueOf(lRet);
+	}
+
+
+	/**
+	 * get state of formatbutton for mpg as Boolean 
+	 * 
+	 * @return
+	 */
+	public synchronized static Boolean getBmpgbuttonstate() {
+		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
+		boolean lbRet = false;
+		while(e.hasMoreElements()){
+			JRadioButton lRb = (JRadioButton) e;
+			String lActionCommand = lRb.getActionCommand();
+			if("mpeg".equals(lActionCommand) && lRb.isSelected() ){
+				lbRet = true;
+				break;
+			}
+		}
+		return Boolean.valueOf(lbRet);
+	}
+
+	/**
+	 * get state of formatbutton for flv as Boolean 
+	 * 
+	 * @return
+	 */
+	public synchronized static Boolean getBflvbuttonstate() {
+		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
+		boolean lbRet = false;
+		while(e.hasMoreElements()){
+			JRadioButton lRb = (JRadioButton) e;
+			String lActionCommand = lRb.getActionCommand();
+			if("flv".equals(lActionCommand) && lRb.isSelected() ){
+				lbRet = true;
+				break;
+			}
+		}
+		return Boolean.valueOf(lbRet);
+	}
+
+	/**
+	 * get state of formatbutton for webm as Boolean 
+	 * 
+	 * @return
+	 */
+	public synchronized static Boolean getBwebmbuttonstate() {
+		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
+		boolean lbRet = false;
+		while(e.hasMoreElements()){
+			JRadioButton lRb = (JRadioButton) e;
+			String lActionCommand = lRb.getActionCommand();
+			if("webm".equals(lActionCommand) && lRb.isSelected() ){
+				lbRet = true;
+				break;
+			}
+		}
+		return Boolean.valueOf(lbRet);
+	}
+
+
+	/**
+	 * get state of 3dbutton as Boolean 
+	 * 
+	 * @return
+	 */
+	public synchronized static Boolean get3Dbuttonstate() {
+		return (save3dcheckbox.isSelected()); 
+	}	
+
+	/**
+	 * append text to textarea
+	 * 
+	 * @param Object o
+	 */
+	public static void addTextToConsole( Object o ) {
+		try {
+			textarea.append( o.toString().concat( newline ) );
+			textarea.setCaretPosition( textarea.getDocument().getLength() );
+			textinputfield.requestFocusInWindow();
+		}catch (Exception e) {
+		}
+	}
+
+	static synchronized void setbNODOWNLOAD( boolean pBNODOWNLOAD ) {
+		bNODOWNLOAD = pBNODOWNLOAD;
+	}
+
+	public static synchronized boolean getbNODOWNLOAD() {
+		// no download if we debug
+		try {
+			return(bNODOWNLOAD);
+		} catch (NullPointerException npe) {
+			return(mIsDebug);
+		}
+	}
+
+	
+	
+	private void addYTURLToList( String sname ) {
+		String sn = sname;
+		// bring all URLs into the same form
+		if (sname.toLowerCase().startsWith("youtube")) {
+			sn = "http://www.".concat(sname);
+		}
+		if (sname.toLowerCase().startsWith("www")) {
+			sn = "http://".concat(sname);
+		}
+		synchronized (dlm) {
+			dlm.addElement( sn );
+		}
+		try {
+			mUrlQueue.setElement(sn);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+
+	private void exchangeYTURLInList( String sfromname, String stoname) {
+		synchronized (dlm) {
+			try {
+				int i = dlm.indexOf( sfromname );
+				dlm.setElementAt(stoname, i);
+			} catch (Throwable t) {}
+		}
+	}
+
+/*
+	private void removeURLFromList( String sname ) {
+		synchronized (dlm) {
+			try {
+				int i = dlm.indexOf( sname );
+				dlm.remove( i );
+			} catch (IndexOutOfBoundsException ioobe) {}
+		}
+	}
+
+	private void clearURLList() {
+		try {
+			synchronized (dlm) {
+				dlm.clear();
+			}
+		} catch (NullPointerException npe) {}
+	}
+*/
+	
+	private void shutdown() {
+		if (saveconfigcheckbox.isSelected()) {
+			mConfiguration.saveConfiguration(sproxy, getIdlbuttonstate(), getBmpgbuttonstate());
+		}
+		GUIClient.setbQuitrequested(true);
+		downloadExecutor.killAll();
+		this.dispose();
+	} 
+
+	/**
+	 * @param string
+	 * @param regex
+	 * @param replaceWith
+	 * @return changed String
+	 */
+	String replaceAll(String string, String regex, String replaceWith) {
+		Pattern myPattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
+		return (myPattern.matcher(string).replaceAll(replaceWith));
+	}
+
+	public GUIClient(Configuration pConfig ) {
+		initialize(pConfig);
+	}
+
+	protected void initialize(Configuration pConfig) {
 
 		mConfiguration = YtdConfigManager.getInstance();
-
+		mAppConfig = pConfig;
+		
+		mIsDebug = mAppConfig.getBoolean("youtube-downloader.debug", false);
+		
 		Runtime.getRuntime().addShutdownHook(new Thread() {
 			@Override
 			public void run() {
@@ -173,255 +371,26 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		}
 
 	}
-
-	public static synchronized Boolean getbQuitrequested() {
-		return bQuitrequested;
-	}
-
-	public static synchronized String getProxy() {
-		return sproxy;
-	}
-
-	public synchronized static void setbQuitrequested(Boolean bQuitrequested) {
-		GUIClient.bQuitrequested = bQuitrequested;
-	}
-
-	/**
-	 * get state of downloadbutton as Integer 
-	 * 
-	 * @return
-	 */
-	public synchronized static int getIdlbuttonstate() {
-		return ((hdbutton.isSelected()?4:0) + (stdbutton.isSelected()?2:0) + (ldbutton.isSelected()?1:0));
-	}
-
-
-	/**
-	 * get state of formatbutton for mpg as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBmpgbuttonstate() {
-		return (mpgbutton.isSelected()); 
-	}
-
-	/**
-	 * get state of formatbutton for flv as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBflvbuttonstate() {
-		return (flvbutton.isSelected()); 
-	}
-
-	/**
-	 * get state of formatbutton for webm as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBwebmbuttonstate() {
-		return (webmbutton.isSelected()); 
-	}
-
-
-	/**
-	 * get state of 3dbutton as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean get3Dbuttonstate() {
-		return (save3dcheckbox.isSelected()); 
-	}	
-
-	/**
-	 * append text to textarea
-	 * 
-	 * @param Object o
-	 */
-	public static void addTextToConsole( Object o ) {
-		try {
-			textarea.append( o.toString().concat( newline ) );
-			textarea.setCaretPosition( textarea.getDocument().getLength() );
-			textinputfield.requestFocusInWindow();
-		} catch (NullPointerException npe) {
-			// for CLI run only
-		} catch (Exception e) {
-		}
-	}
-
-
-	private void addYTURLToList( String sname ) {
-		String sn = sname;
-		// bring all URLs into the same form
-		if (sname.toLowerCase().startsWith("youtube")) {
-			sn = "http://www.".concat(sname);
-		}
-		if (sname.toLowerCase().startsWith("www")) {
-			sn = "http://".concat(sname);
-		}
-		synchronized (dlm) {
-			dlm.addElement( sn );
-//			dlm.notify();
-		}
-		try {
-			mUrlQueue.setElement(sn);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-	}
-
-	private void exchangeYTURLInList( String sfromname, String stoname) {
-		synchronized (dlm) {
-			try {
-				int i = dlm.indexOf( sfromname );
-				dlm.setElementAt(stoname, i);
-			} catch (Throwable t) {}
-		}
-	}
-
-	private void removeURLFromList( String sname ) {
-		synchronized (dlm) {
-			try {
-				int i = dlm.indexOf( sname );
-				dlm.remove( i );
-			} catch (IndexOutOfBoundsException ioobe) {}
-		}
-	}
-/*
-	private void clearURLList() {
-		try {
-			synchronized (dlm) {
-				dlm.clear();
-			}
-		} catch (NullPointerException npe) {}
-	}
-*/
-	private void shutdown() {
-		if (saveconfigcheckbox.isSelected()) {
-			mConfiguration.saveConfiguration(sproxy, getIdlbuttonstate(), getBmpgbuttonstate());
-		}
-		GUIClient.setbQuitrequested(true);
-		downloadExecutor.killAll();
-		this.dispose();
-	} 
-
-	/**
-	 * @param string
-	 * @param regex
-	 * @param replaceWith
-	 * @return changed String
-	 */
-	String replaceAll(String string, String regex, String replaceWith) {
-		Pattern myPattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
-		return (myPattern.matcher(string).replaceAll(replaceWith));
-	} 
-
-	/**
-	 * process events of ActionListener
-	 * 
-	 */
-	public void actionPerformed( final ActionEvent e ) {
-		if (e.getSource().equals( textinputfield )) {
-			if (!e.getActionCommand().equals( "" )) { 
-				if (e.getActionCommand().matches(URLUtils.szYTREGEX)) {
-					addYTURLToList(e.getActionCommand());
-				} else {
-					addTextToConsole(e.getActionCommand());
-				}
-			}
-			synchronized (textinputfield) {
-				textinputfield.setText("");				
-			}
-			return;
-		}
-
-		// let the user choose another dir
-		if (e.getSource().equals( directorybutton )) {
-			JFileChooser fc = new JFileChooser();
-			fc.setMultiSelectionEnabled(false);
-			fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-			synchronized (directorytextfield) {
-				// we have to set current directory here because it gets lost when fc is lost
-				fc.setCurrentDirectory( new File( directorytextfield.getText()) );
-			}
-			if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
-				return;
-			}
-			String snewdirectory = fc.getSelectedFile().getAbsolutePath();
-			// append file.seperator if last character is not file.seperator (the user choosed a directory other than root)
-			snewdirectory.concat(snewdirectory.endsWith(System.getProperty("file.separator"))?"":System.getProperty("file.separator"));
-			File ftest = new File(snewdirectory);
-			if (ftest.exists()) {
-				if (ftest.isDirectory()) {
-					synchronized (directorytextfield) {
-						directorytextfield.setText( snewdirectory );
-					}
-					mConfiguration.setSaveDirectory(snewdirectory);
-				} 
-			}
-			return;
-		}
-
-		// let the user choose another download resolution
-		if (e.getActionCommand().equals(hdbutton.getActionCommand()) || 
-				e.getActionCommand().equals(stdbutton.getActionCommand()) ||
-				e.getActionCommand().equals(ldbutton.getActionCommand()) ) {
-
-			return;
-		}
-
-		// let the user choose another video format
-		if (e.getActionCommand().equals(mpgbutton.getActionCommand()) ||
-				e.getActionCommand().equals(flvbutton.getActionCommand()) || 
-				e.getActionCommand().equals(webmbutton.getActionCommand()) ) {
-			return;
-		} 
-
-		if (e.getActionCommand().equals( "quit" )) {
-			addTextToConsole("quit requested - signaling donwload threads to terminate, this may take a while!");
-			// seems to have to effect:
-			//repaint();
-			this.shutdown();
-			return;
-		}
-
-	}
-
-	static synchronized void setbNODOWNLOAD( boolean pBNODOWNLOAD ) {
-		bNODOWNLOAD = pBNODOWNLOAD;
-	}
-
-	public static synchronized boolean getbNODOWNLOAD() {
-		// no download if we debug
-		try {
-			return(bNODOWNLOAD);
-		} catch (NullPointerException npe) {
-			return(GUIClient.getbDEBUG());
-		}
-	}
-
-	public static synchronized boolean getbDEBUG() {
-		try {
-			return(bDEBUG);
-		} catch (NullPointerException npe) {
-			return GUIClient.szVersion.matches("V[0-9]+_[0-9]+d.*");
-		}
-	}
-
+	
 	/**
 	 * Create the GUI and show it. For thread safety, this method should be
 	 * invoked from the event dispatch thread.
 	 */
 	private void initializeUI() {
-		String sv = "YTD2 ".concat(szVersion).concat(" ").concat("http://sourceforge.net/projects/ytd2/"); // ytd2.sf.net is shorter
+		String lAppName = mAppConfig.getString("youtube-downloader.name");
+		String lAppVersion = mAppConfig.getString("youtube-downloader.version");
+		String lAppUrl = mAppConfig.getString("youtube-downloader.url");
+		String sv = lAppName.concat(" ").concat(lAppVersion).concat(" ").concat(lAppUrl);
+		
 		setDefaultLookAndFeelDecorated(false);
+		
 		this.setTitle(sv);
 		this.setDefaultCloseOperation( WindowConstants.DO_NOTHING_ON_CLOSE );
 		this.addComponentsToPane( this.getContentPane() );
 		this.pack();
 		this.setVisible( true );
 
-		sv = "version: ".concat( szVersion ).concat(GUIClient.getbDEBUG()?" DEBUG ":"");
+		sv = "version: ".concat( lAppVersion ).concat(mIsDebug?" DEBUG ":"");
 
 		sproxy = System.getenv("http_proxy");
 		if (sproxy==null) {
@@ -438,19 +407,20 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		// lets respect the upload limit of google (youtube)
 		// downloading is faster than viewing anyway so don't start more than six threads and don't play around with the URL-strings please!!!
 		mUrlQueue = new UrlList();
-		downloadExecutor = new DownloaderStub(mUrlQueue,  new DnlListener());
+		downloadExecutor = new DownloaderStub(mUrlQueue,  new DnlListener(), mIsDebug);
 		downloadExecutor.startAll();
 	}
 
 	private void addComponentsToPane( final Container pane ) {
 		this.panel = new JPanel();
-
 		this.panel.setLayout( new GridBagLayout() );
 
 		GridBagConstraints gbc = new GridBagConstraints();
 		gbc.insets = new Insets( 5, 5, 5, 5 );
 		gbc.anchor = GridBagConstraints.WEST;
 
+		ActionManager lActionManager = new ActionManager();
+		
 		dlm = new DefaultListModel<String>();
 		this.urllist = new JList<String>( dlm );
 		// TODO maybe we add a button to remove added URLs from list?
@@ -473,7 +443,7 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		this.directorybutton = new JButton("", createImageIcon("images/open.png",""));
 		gbc.gridx = 0;
 		gbc.gridy = 0;
-		this.directorybutton.addActionListener( this );
+		this.directorybutton.addActionListener( lActionManager );
 		this.panel.add( this.directorybutton, gbc );
 
 		this.saveconfigcheckbox = new JCheckBox("Save config");
@@ -483,23 +453,18 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 
 		this.saveconfigcheckbox.setEnabled(false);
 
-		String sfilesep = System.getProperty("file.separator");
-
 		// TODO check if initial download directory exists
 		// assume that at least the users homedir exists
-		String shomedir = System.getProperty("user.home").concat(sfilesep);
-		if (System.getProperty("user.home").equals("/home/knoedel")) {
-			shomedir = "/home/knoedel/YouTube Downloads/";
-		}
+		String shomedir = System.getProperty("user.home").concat(File.separator);
 
 		gbc.gridx = 0;
 		gbc.gridy = 2;
 		gbc.gridwidth = 2;
 		gbc.fill = GridBagConstraints.HORIZONTAL;
-		this.directorytextfield = new JTextField( shomedir, 20+(GUIClient.getbDEBUG()?48:0) );
+		this.directorytextfield = new JTextField( shomedir, 20+(mIsDebug?48:0) );
 		this.directorytextfield.setEnabled( false );
 		this.directorytextfield.setFocusable( true );
-		this.directorytextfield.addActionListener( this );
+		this.directorytextfield.addActionListener( lActionManager );
 		this.panel.add( this.directorytextfield, gbc);
 
 		JLabel dirhint = new JLabel("Download to folder:");
@@ -508,7 +473,7 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		gbc.gridy = 1;
 		this.panel.add( dirhint, gbc);
 
-		this.middlepane.setPreferredSize( new Dimension( Toolkit.getDefaultToolkit().getScreenSize().width/3, Toolkit.getDefaultToolkit().getScreenSize().height/4+(GUIClient.getbDEBUG()?200:0) ) );
+		this.middlepane.setPreferredSize( new Dimension( Toolkit.getDefaultToolkit().getScreenSize().width/3, Toolkit.getDefaultToolkit().getScreenSize().height/4+(mIsDebug?200:0) ) );
 
 		gbc.gridx = 0;
 		gbc.gridy = 3;
@@ -519,23 +484,24 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		this.panel.add( this.middlepane, gbc );
 
 		// radio buttons for resolution to download
-		hdbutton = new JRadioButton("HD"); hdbutton.setActionCommand("hd"); hdbutton.addActionListener(this); hdbutton.setToolTipText("1080p/720p");
-		stdbutton = new JRadioButton("Std"); stdbutton.setActionCommand("std"); stdbutton.addActionListener(this); stdbutton.setToolTipText("480p/360p");
-		ldbutton = new JRadioButton("LD"); ldbutton.setActionCommand("ld"); ldbutton.addActionListener(this); ldbutton.setToolTipText("< 360p");
-
-		stdbutton.setSelected(true);
-		hdbutton.setEnabled(true);
-		ldbutton.setEnabled(true);
-
-		ButtonGroup bgroup = new ButtonGroup();
-		bgroup.add(hdbutton);
-		bgroup.add(stdbutton);
-		bgroup.add(ldbutton);
-
-		JPanel radiopanel = new JPanel(new GridLayout(1,0));
-		radiopanel.add(hdbutton);
-		radiopanel.add(stdbutton);
-		radiopanel.add(ldbutton);
+		mVideoResolutionBtnGrp = new ButtonGroup();
+		JPanel lRadioPanel = new JPanel(new GridLayout(1,0));
+		List<Object> lVidQ = mAppConfig.getList("youtube-downloader.video-quality");
+		JRadioButton lRadioButton = null;
+		for (Object obj : lVidQ) {
+			String lQuality = (String) obj;
+			String lToolTip = mAppConfig.getString("youtube-downloader.video-quality."+lQuality+".tooltip");
+			boolean lSelected = mAppConfig.getBoolean("youtube-downloader.video-quality."+lQuality+".selected");
+			boolean lEnabled = mAppConfig.getBoolean("youtube-downloader.video-quality."+lQuality+".enabled");
+			lRadioButton = new JRadioButton(lQuality);
+			lRadioButton.setActionCommand(lQuality.toLowerCase());
+			lRadioButton.addActionListener(lActionManager); 
+			lRadioButton.setToolTipText(lToolTip);
+			lRadioButton.setSelected(lSelected);
+			lRadioButton.setEnabled(lEnabled);
+			mVideoResolutionBtnGrp.add(lRadioButton);
+			lRadioPanel.add(lRadioButton);
+		}
 
 		gbc.gridx = 1;
 		gbc.gridy = 0;
@@ -543,33 +509,32 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		gbc.gridwidth = 0;
 		gbc.fill = GridBagConstraints.NONE;
 		gbc.anchor = GridBagConstraints.NORTHEAST;
-		this.panel.add( radiopanel, gbc );
+		this.panel.add( lRadioPanel, gbc );
 
 		// radio buttons for video format to download
-		mpgbutton = new JRadioButton("MPEG"); mpgbutton.setActionCommand("mpg"); mpgbutton.addActionListener(this); mpgbutton.setToolTipText("Codec: H.264 MPEG-4");
-		webmbutton = new JRadioButton("WEBM"); webmbutton.setActionCommand("webm"); webmbutton.addActionListener(this); webmbutton.setToolTipText("Codec: Google/On2's VP8 or Googles WebM");
-		flvbutton = new JRadioButton("FLV"); flvbutton.setActionCommand("flv"); flvbutton.addActionListener(this); flvbutton.setToolTipText("Codec: Flash Video (FLV1)");
-
-		bgroup = new ButtonGroup();
-		bgroup.add(mpgbutton);
-		bgroup.add(webmbutton);
-		bgroup.add(flvbutton);
-
-		mpgbutton.setSelected(true);
-		mpgbutton.setEnabled(true);
-		webmbutton.setEnabled(true);
-		flvbutton.setEnabled(true);
-
+		mVideoFormatBtnGrp = new ButtonGroup();
+		lRadioPanel = new JPanel(new GridLayout(1,0));
 		save3dcheckbox = new JCheckBox("3D");
 		save3dcheckbox.setToolTipText("stereoscopic video");
 		save3dcheckbox.setSelected(false);
 		save3dcheckbox.setEnabled(true);
-
-		radiopanel = new JPanel(new GridLayout(1,0));
-		radiopanel.add(save3dcheckbox);
-		radiopanel.add(mpgbutton);
-		radiopanel.add(webmbutton);
-		radiopanel.add(flvbutton);
+		lRadioPanel.add(save3dcheckbox);
+		List<Object> lVidR = mAppConfig.getList("youtube-downloader.video-resolution");
+		lRadioButton = null;
+		for (Object obj : lVidR) {
+			String lQuality = (String) obj;
+			String lToolTip = mAppConfig.getString("youtube-downloader.video-resolution."+lQuality+".tooltip");
+			boolean lSelected = mAppConfig.getBoolean("youtube-downloader.video-resolution."+lQuality+".selected");
+			boolean lEnabled = mAppConfig.getBoolean("youtube-downloader.video-resolution."+lQuality+".enabled");
+			lRadioButton = new JRadioButton(lQuality);
+			lRadioButton.setActionCommand(lQuality.toLowerCase());
+			lRadioButton.addActionListener(lActionManager); 
+			lRadioButton.setToolTipText(lToolTip);
+			lRadioButton.setSelected(lSelected);
+			lRadioButton.setEnabled(lEnabled);
+			mVideoFormatBtnGrp.add(lRadioButton);
+			lRadioPanel.add(lRadioButton);
+		}
 
 		gbc.gridx = 1;
 		gbc.gridy = 1;
@@ -577,7 +542,7 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		gbc.gridwidth = 0;
 		gbc.fill = GridBagConstraints.NONE;
 		gbc.anchor = GridBagConstraints.NORTHEAST;
-		this.panel.add( radiopanel, gbc );
+		this.panel.add( lRadioPanel, gbc );
 
 		JLabel hint = new JLabel("Type, paste or drag'n drop a YouTube video address:");
 
@@ -598,55 +563,38 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		gbc.gridwidth = 2;
 		textinputfield.setEnabled( true );
 		textinputfield.setFocusable( true );
-		textinputfield.addActionListener( this );
-		textinputfield.getDocument().addDocumentListener(this);
+		textinputfield.addActionListener( lActionManager );
+		textinputfield.getDocument().addDocumentListener(new UrlInsertListener());
 		this.panel.add( textinputfield, gbc );
 
 		this.quitbutton = new JButton( "" ,createImageIcon("images/exit.png",""));		
 		gbc.gridx = 2;
 		gbc.gridy = 5;
 		gbc.gridwidth = 0;
-		this.quitbutton.addActionListener( this );
+		this.quitbutton.addActionListener( lActionManager );
 		this.quitbutton.setActionCommand( "quit" );
 		this.quitbutton.setToolTipText( "Exit." );
 
 		this.panel.add( this.quitbutton, gbc );
 
 		pane.add( this.panel );
-		addWindowListener( this );
+		addWindowListener( new GUIWindowAdapter() );
 
-		this.setDropTarget(new DropTarget(this, this));
+		this.setDropTarget(new DropTarget(this, new DragDropListener()));
 		textarea.setTransferHandler(null); // otherwise the dropped text would be inserted
 
 	}
 
-	public void windowActivated( WindowEvent e ) {
-		textinputfield.requestFocusInWindow();
+	private ImageIcon createImageIcon(String path, String description) {
+		java.net.URL imgURL = getClass().getClassLoader().getResource(path);
+		if (imgURL != null) {
+			return new ImageIcon(imgURL, description);
+		} else {
+			System.err.println("Couldn't find file: " + path);
+			return null;
+		}
 	}
-
-	public void windowClosed( WindowEvent e ) {
-	}
-
-	/**
-	 * quit==exit
-	 * 
-	 */
-	public void windowClosing( WindowEvent e ) {
-		this.shutdown();
-	}
-
-	public void windowDeactivated( WindowEvent e ) {
-	}
-
-	public void windowDeiconified( WindowEvent e ) {
-	}
-
-	public void windowIconified( WindowEvent e ) {
-	}
-
-	public void windowOpened( WindowEvent e ) {
-	}
-
+	
 	@Override
 	public void processComponentEvent(ComponentEvent e) {
 		switch (e.getID()) {
@@ -660,159 +608,216 @@ public class GUIClient extends JFrame implements ActionListener, WindowListener,
 		case ComponentEvent.COMPONENT_SHOWN:
 			break;
 		}
-	} // processComponentEvent
-
-	public void changedUpdate(DocumentEvent e) {
-		checkInputFieldforYTURLs();
 	}
+	
+	private class ActionManager implements ActionListener{
 
-
-	public void insertUpdate(DocumentEvent e) {
-		checkInputFieldforYTURLs();
-	} 
-
-	public void removeUpdate(DocumentEvent e) {
-		checkInputFieldforYTURLs();
-	}
-	/**
-	 * check if a youtube-URL was pasted or typed in
-	 * if yes cut it out and send it to the URLList to get processed by one of the threads
-	 * 
-	 * the user can paste a long string containing many youtube-URLs .. but here is work to do because we have to erase the string(s) that remain(s)
-	 */
-	void checkInputFieldforYTURLs() {
-		String sinput = textinputfield.getText(); // don't call .toLowerCase() !
-
-		sinput = sinput.replaceAll("/watch?.*&v=", "/watch?v=");
-		sinput = sinput.replaceAll(" ", "");
-		sinput = sinput.replaceAll(szPLAYLISTREGEX, "/watch?v=");
-
-		String surl = sinput.replaceFirst(URLUtils.szYTREGEX, "");
-
-		// if nothing could be replaced we have to yt-URL found
-		if (sinput.equals(surl)) {
-			return;
-		}
-
-		// starting at index 0 because szYTREGEX should start with ^ // if szYTREGEX does not start with ^ then you have to find the index where the match is before you can cut out the URL 
-		surl = sinput.substring(0, sinput.length()-surl.length());
-		addYTURLToList(surl);
-		sinput = sinput.substring(surl.length());
-
-		// if remaining text is shorter than shortest possible yt-url we delete it
-		if (sinput.length()<"youtube.com/watch?v=0123456789a".length()) {
-			sinput = "";
-		}
-
-		//frame.textinputfield.setText(sinput); // generates a java.lang.IllegalStateException: Attempt to mutate in notification
-
-		final String fs = sinput;
-
-		// let a thread update the textfield in the UI
-		Thread worker = new Thread() {
-			@Override
-			public void run() {
+		@Override
+		public void actionPerformed(ActionEvent e) {
+			if (e.getSource().equals( textinputfield )) {
+				if (!e.getActionCommand().equals( "" )) { 
+					if (e.getActionCommand().matches(URLUtils.szYTREGEX)) {
+						addYTURLToList(e.getActionCommand());
+					} else {
+						addTextToConsole(e.getActionCommand());
+					}
+				}
 				synchronized (textinputfield) {
-					textinputfield.setText(fs);
+					textinputfield.setText("");				
 				}
+				return;
 			}
-		};
-		SwingUtilities.invokeLater (worker);
-	} // checkInputFieldforYTURLS
 
-	ImageIcon createImageIcon(String path, String description) {
-		java.net.URL imgURL = getClass().getClassLoader().getResource(path);
-		if (imgURL != null) {
-			return new ImageIcon(imgURL, description);
-		} else {
-			System.err.println("Couldn't find file: " + path);
-			return null;
-		}
-	} // createImageIcon
-
-	public void stateChanged(ChangeEvent e) {
-	}
-
-
-	public void dragEnter(DropTargetDragEvent dtde) {
-	}
-
-
-	public void dragOver(DropTargetDragEvent dtde) {
-	}
-
-
-	public void dropActionChanged(DropTargetDragEvent dtde) {
-	}
-
-
-	public void dragExit(DropTargetEvent dte) {
-	}
-
-
-	/**
-	 * processing event of dropping a HTTP URL, YT-Video Image or plain text (URL) onto the frame
-	 * 
-	 * seems not to work with M$-IE (8,9) - what a pity!
-	 */
-	public void drop(DropTargetDropEvent dtde) {
-		Transferable tr = dtde.getTransferable();
-		DataFlavor[] flavors = tr.getTransferDataFlavors();
-		DataFlavor fl = null;
-		String str = "";
-		for (int i = 0; i < flavors.length; i++) {
-			fl = flavors[i];
-			if (fl.isFlavorTextType() /* || fl.isMimeTypeEqual("text/html") || fl.isMimeTypeEqual("application/x-java-url") || fl.isMimeTypeEqual("text/uri-list")*/) {
-				try {
-					dtde.acceptDrop(dtde.getDropAction());
-				} catch (Throwable t) {
+			// let the user choose another dir
+			if (e.getSource().equals( directorybutton )) {
+				JFileChooser fc = new JFileChooser();
+				fc.setMultiSelectionEnabled(false);
+				fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+				synchronized (directorytextfield) {
+					// we have to set current directory here because it gets lost when fc is lost
+					fc.setCurrentDirectory( new File( directorytextfield.getText()) );
 				}
-				try {
-					if (tr.getTransferData(fl) instanceof InputStreamReader) {
-						BufferedReader textreader = new BufferedReader( (Reader) tr.getTransferData(fl));
-						String sline = "";
-						try {
-							while (sline != null) {
-								sline = textreader.readLine();
-								if (sline != null) {
-									str += sline;
+				if (fc.showOpenDialog(GUIClient.this) != JFileChooser.APPROVE_OPTION) {
+					return;
+				}
+				String snewdirectory = fc.getSelectedFile().getAbsolutePath();
+				// append file.seperator if last character is not file.seperator (the user choosed a directory other than root)
+				snewdirectory.concat(snewdirectory.endsWith(System.getProperty("file.separator"))?"":System.getProperty("file.separator"));
+				File ftest = new File(snewdirectory);
+				if (ftest.exists()) {
+					if (ftest.isDirectory()) {
+						synchronized (directorytextfield) {
+							directorytextfield.setText( snewdirectory );
+						}
+						mConfiguration.setSaveDirectory(snewdirectory);
+					} 
+				}
+				return;
+			}
+			
+			// let the user choose another download resolution
+			if ( e.getActionCommand().equals(mVideoResolutionBtnGrp.getSelection().getActionCommand()) ) {
+				return;
+			}
+			
+			// let the user choose another video format
+			if (e.getActionCommand().equals(mVideoFormatBtnGrp.getSelection().getActionCommand()) ) {
+				return;
+			} 
+
+			if (e.getActionCommand().equals( "quit" )) {
+				addTextToConsole("quit requested - signaling donwload threads to terminate, this may take a while!");
+				// seems to have to effect:
+				//repaint();
+				GUIClient.this.shutdown();
+				return;
+			}
+		}
+		
+	}
+	
+	private class UrlInsertListener implements DocumentListener{
+
+		@Override
+		public void insertUpdate(DocumentEvent e) {
+			checkInputFieldforYTURLs();
+		}
+
+		@Override
+		public void removeUpdate(DocumentEvent e) {
+			checkInputFieldforYTURLs();
+		}
+
+		@Override
+		public void changedUpdate(DocumentEvent e) {
+			checkInputFieldforYTURLs();
+		}
+		
+		/**
+		 * check if a youtube-URL was pasted or typed in
+		 * if yes cut it out and send it to the URLList to get processed by one of the threads
+		 * 
+		 * the user can paste a long string containing many youtube-URLs .. but here is work to do because we have to erase the string(s) that remain(s)
+		 */
+		void checkInputFieldforYTURLs() {
+			String sinput = textinputfield.getText(); // don't call .toLowerCase() !
+
+			sinput = sinput.replaceAll("/watch?.*&v=", "/watch?v=");
+			sinput = sinput.replaceAll(" ", "");
+			sinput = sinput.replaceAll(szPLAYLISTREGEX, "/watch?v=");
+
+			String surl = sinput.replaceFirst(URLUtils.szYTREGEX, "");
+
+			// if nothing could be replaced we have to yt-URL found
+			if (sinput.equals(surl)) {
+				return;
+			}
+
+			// starting at index 0 because szYTREGEX should start with ^ // if szYTREGEX does not start with ^ then you have to find the index where the match is before you can cut out the URL 
+			surl = sinput.substring(0, sinput.length()-surl.length());
+			addYTURLToList(surl);
+			sinput = sinput.substring(surl.length());
+
+			// if remaining text is shorter than shortest possible yt-url we delete it
+			if (sinput.length()<"youtube.com/watch?v=0123456789a".length()) {
+				sinput = "";
+			}
+
+			//frame.textinputfield.setText(sinput); // generates a java.lang.IllegalStateException: Attempt to mutate in notification
+
+			final String fs = sinput;
+
+			// let a thread update the textfield in the UI
+			Thread worker = new Thread() {
+				@Override
+				public void run() {
+					synchronized (textinputfield) {
+						textinputfield.setText(fs);
+					}
+				}
+			};
+			SwingUtilities.invokeLater (worker);
+		}
+		
+	}
+	
+	private class GUIWindowAdapter extends WindowAdapter{
+		
+		@Override
+		public void windowActivated(WindowEvent e) {
+			textinputfield.requestFocusInWindow();
+		}
+		
+		@Override
+		public void windowClosing(WindowEvent e) {
+			GUIClient.this.shutdown();
+		}
+		
+	}
+
+	private class DragDropListener extends DropTargetAdapter{
+
+		@Override
+		public void drop(DropTargetDropEvent dtde) {
+			Transferable tr = dtde.getTransferable();
+			DataFlavor[] flavors = tr.getTransferDataFlavors();
+			DataFlavor fl = null;
+			String str = "";
+			for (int i = 0; i < flavors.length; i++) {
+				fl = flavors[i];
+				if (fl.isFlavorTextType() /* || fl.isMimeTypeEqual("text/html") || fl.isMimeTypeEqual("application/x-java-url") || fl.isMimeTypeEqual("text/uri-list")*/) {
+					try {
+						dtde.acceptDrop(dtde.getDropAction());
+					} catch (Throwable t) {
+					}
+					try {
+						if (tr.getTransferData(fl) instanceof InputStreamReader) {
+							BufferedReader textreader = new BufferedReader( (Reader) tr.getTransferData(fl));
+							String sline = "";
+							try {
+								while (sline != null) {
+									sline = textreader.readLine();
+									if (sline != null) {
+										str += sline;
+									}
+								}
+							} catch (Exception e) {
+							} finally {
+								textreader.close();
+							}
+							str = str.replaceAll("<[^>]*>", ""); // remove HTML tags, especially a hrefs - ignore HTML characters like &szlig; (which are no tags)
+						} else if (tr.getTransferData(fl) instanceof InputStream) {
+							InputStream input = new BufferedInputStream((InputStream) tr.getTransferData(fl));
+							int idata = 0;
+							StringBuilder sresult = new StringBuilder();
+							while ( (idata = input.read()) != -1) {
+								if (idata != 0) {
+									sresult.append( new Character((char) idata).toString() );
 								}
 							}
-						} catch (Exception e) {
-						} finally {
-							textreader.close();
+						} else {
+							str = tr.getTransferData(fl).toString();
 						}
-						str = str.replaceAll("<[^>]*>", ""); // remove HTML tags, especially a hrefs - ignore HTML characters like &szlig; (which are no tags)
-					} else if (tr.getTransferData(fl) instanceof InputStream) {
-						InputStream input = new BufferedInputStream((InputStream) tr.getTransferData(fl));
-						int idata = 0;
-						StringBuilder sresult = new StringBuilder();
-						while ( (idata = input.read()) != -1) {
-							if (idata != 0) {
-								sresult.append( new Character((char) idata).toString() );
-							}
-						}
-					} else {
-						str = tr.getTransferData(fl).toString();
+					} catch (IOException ioe) {
+					} catch (UnsupportedFlavorException ufe) {
 					}
-				} catch (IOException ioe) {
-				} catch (UnsupportedFlavorException ufe) {
-				}
 
-				// insert text into textfield - almost the same as user drops text/url into this field
-				// except special characaters -> from http://de.wikipedia.org/wiki/GNU-Projekt („GNU is not Unix“)(&bdquo;GNU is not Unix&ldquo;)
-				// two drops from same source .. one time in textfield and elsewhere - maybe we change that later?!
-				if (str.matches(URLUtils.szYTREGEX.concat("(.*)"))) {
-					synchronized (textinputfield) {
-						textinputfield.setText(str.concat(textinputfield.getText()));
+					// insert text into textfield - almost the same as user drops text/url into this field
+					// except special characaters -> from http://de.wikipedia.org/wiki/GNU-Projekt („GNU is not Unix“)(&bdquo;GNU is not Unix&ldquo;)
+					// two drops from same source .. one time in textfield and elsewhere - maybe we change that later?!
+					if (str.matches(URLUtils.szYTREGEX.concat("(.*)"))) {
+						synchronized (textinputfield) {
+							textinputfield.setText(str.concat(textinputfield.getText()));
+						}
+						break;
 					}
-					break;
 				}
 			}
-		}
 
-		dtde.dropComplete(true);
-	} 
+			dtde.dropComplete(true);
+		}
+		
+	}
 
 	private class DnlListener implements DownloaderListener{
 

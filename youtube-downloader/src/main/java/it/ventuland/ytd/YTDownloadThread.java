@@ -71,11 +71,14 @@ public class YTDownloadThread extends Thread {
 
 	String sContentType = null;
 
+	private boolean isDebug = false;
+	
 	private ArrayList<DownloaderListener> mDnlListenerList = new ArrayList<DownloaderListener>();
 	
-	public YTDownloadThread(UrlList pUrlsList) {
+	public YTDownloadThread(UrlList pUrlsList, boolean pIsDebug) {
 		super();
 		mUrlList = pUrlsList;
+		isDebug = pIsDebug;
 		String sv = "thread started: ".concat(this.getMyName());
 		debugoutput(sv);
 	}
@@ -214,7 +217,7 @@ public class YTDownloadThread extends Thread {
 	}
 
 	void reportheaderinfo(HttpResponse response) {
-		if (GUIClient.getbDEBUG()) {
+		if (isDebug) {
 			debugoutput("");
 			debugoutput("NO-DOWNLOAD mode active (ndl on)");
 			debugoutput("all HTTP header fields:");
@@ -670,7 +673,7 @@ public class YTDownloadThread extends Thread {
 	}
 
 	synchronized void debugoutput(String s) {
-		if (!GUIClient.getbDEBUG()) {
+		if (!isDebug) {
 			return;
 		}
 		// sometimes this happens: Exception in thread "Thread-2" java.lang.Error: Interrupted attempt to aquire write lock (on quit only)
@@ -689,7 +692,7 @@ public class YTDownloadThread extends Thread {
 	}
 
 	void output(String s) {
-		if (GUIClient.getbDEBUG()) {
+		if (isDebug) {
 			return;
 		}
 		GUIClient.addTextToConsole("#info - ".concat(s));
