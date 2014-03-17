@@ -120,12 +120,6 @@ public class GUIClient extends JFrame {
 	static ButtonGroup mVideoResolutionBtnGrp;
 	static ButtonGroup mVideoFormatBtnGrp;
 	static JCheckBox save3dcheckbox = null;
-//	private JRadioButton hdbutton = null;
-//	private JRadioButton stdbutton = null;
-//	private JRadioButton ldbutton = null;
-//	private JRadioButton mpgbutton = null;
-//	private JRadioButton flvbutton = null;
-//	private JRadioButton webmbutton = null;
 	
 	JCheckBox saveconfigcheckbox = null;
 
@@ -135,7 +129,6 @@ public class GUIClient extends JFrame {
 	private Configuration mAppConfig = null;
 	private IConfiguration mConfiguration = null;
 
-	
 	public static synchronized Boolean getbQuitrequested() {
 		return bQuitrequested;
 	}
@@ -154,20 +147,10 @@ public class GUIClient extends JFrame {
 	 * @return
 	 */
 	public synchronized static Integer getIdlbuttonstate() {
-		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
-		int lRet = 0;
-		while(e.hasMoreElements()){
-			JRadioButton lRb = (JRadioButton) e;
-			String lActionCommand = lRb.getActionCommand();
-			if("hd".equals(lActionCommand) && lRb.isSelected() ){
-				lRet += 4;
-			}else if("std".equals(lActionCommand) && lRb.isSelected() ){
-				lRet += 2;
-			}else if("ld".equals(lActionCommand) && lRb.isSelected() ){
-				lRet += 1;
-			}
-		}
-		return Integer.valueOf(lRet);
+		int a = isButtonSelected("hd")? 4 : 0;
+		int b = isButtonSelected("std")? 2 : 0;
+		int c = isButtonSelected("ld")? 1 : 0;
+		return Integer.valueOf(a+b+c);
 	}
 
 
@@ -177,17 +160,7 @@ public class GUIClient extends JFrame {
 	 * @return
 	 */
 	public synchronized static Boolean getBmpgbuttonstate() {
-		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
-		boolean lbRet = false;
-		while(e.hasMoreElements()){
-			JRadioButton lRb = (JRadioButton) e;
-			String lActionCommand = lRb.getActionCommand();
-			if("mpeg".equals(lActionCommand) && lRb.isSelected() ){
-				lbRet = true;
-				break;
-			}
-		}
-		return Boolean.valueOf(lbRet);
+		return isButtonSelected("mpeg");
 	}
 
 	/**
@@ -196,17 +169,7 @@ public class GUIClient extends JFrame {
 	 * @return
 	 */
 	public synchronized static Boolean getBflvbuttonstate() {
-		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
-		boolean lbRet = false;
-		while(e.hasMoreElements()){
-			JRadioButton lRb = (JRadioButton) e;
-			String lActionCommand = lRb.getActionCommand();
-			if("flv".equals(lActionCommand) && lRb.isSelected() ){
-				lbRet = true;
-				break;
-			}
-		}
-		return Boolean.valueOf(lbRet);
+		return isButtonSelected("flv");
 	}
 
 	/**
@@ -215,19 +178,8 @@ public class GUIClient extends JFrame {
 	 * @return
 	 */
 	public synchronized static Boolean getBwebmbuttonstate() {
-		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
-		boolean lbRet = false;
-		while(e.hasMoreElements()){
-			JRadioButton lRb = (JRadioButton) e;
-			String lActionCommand = lRb.getActionCommand();
-			if("webm".equals(lActionCommand) && lRb.isSelected() ){
-				lbRet = true;
-				break;
-			}
-		}
-		return Boolean.valueOf(lbRet);
+		return isButtonSelected("webm");
 	}
-
 
 	/**
 	 * get state of 3dbutton as Boolean 
@@ -265,7 +217,19 @@ public class GUIClient extends JFrame {
 		}
 	}
 
-	
+	private static Boolean isButtonSelected(String pButtonName){
+		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
+		boolean lbRet = false;
+		while(e.hasMoreElements()){
+			JRadioButton lRb = (JRadioButton) e;
+			String lActionCommand = lRb.getActionCommand();
+			if(pButtonName.equals(lActionCommand) && lRb.isSelected() ){
+				lbRet = true;
+				break;
+			}
+		}
+		return Boolean.valueOf(lbRet);
+	}
 	
 	private void addYTURLToList( String sname ) {
 		String sn = sname;
@@ -313,15 +277,6 @@ public class GUIClient extends JFrame {
 		} catch (NullPointerException npe) {}
 	}
 */
-	
-	private void shutdown() {
-		if (saveconfigcheckbox.isSelected()) {
-			mConfiguration.saveConfiguration(sproxy, getIdlbuttonstate(), getBmpgbuttonstate());
-		}
-		GUIClient.setbQuitrequested(true);
-		downloadExecutor.killAll();
-		this.dispose();
-	} 
 
 	/**
 	 * @param string
@@ -371,6 +326,15 @@ public class GUIClient extends JFrame {
 		}
 
 	}
+	
+	private void shutdown() {
+		if (saveconfigcheckbox.isSelected()) {
+			mConfiguration.saveConfiguration(sproxy, getIdlbuttonstate(), getBmpgbuttonstate());
+		}
+		GUIClient.setbQuitrequested(true);
+		downloadExecutor.killAll();
+		this.dispose();
+	} 
 	
 	/**
 	 * Create the GUI and show it. For thread safety, this method should be
