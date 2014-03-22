@@ -16,4 +16,6 @@ public interface DownloaderListener extends EventListener {
 
 	public void threadIdle(DownloadEvent e);
 	
+	public void threadAborted(DownloadEvent e);
+	
 }

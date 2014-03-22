@@ -5,17 +5,17 @@ import java.util.concurrent.TimeUnit;
 
 public class UrlList {
 	
-	LinkedBlockingQueue<String> mQueue;
+	LinkedBlockingQueue<VideoElement> mQueue;
 	
 	public UrlList() {
-		mQueue = new LinkedBlockingQueue<String>();
+		mQueue = new LinkedBlockingQueue<VideoElement>();
 	}
 
-	public String getElement() throws InterruptedException {
+	public VideoElement getElement() throws InterruptedException {
 		return mQueue.poll(100, TimeUnit.MILLISECONDS);
 	}
 	
-	public void setElement(String e) throws InterruptedException{
+	public void setElement(VideoElement e) throws InterruptedException{
 		mQueue.put(e);
 	}
 	

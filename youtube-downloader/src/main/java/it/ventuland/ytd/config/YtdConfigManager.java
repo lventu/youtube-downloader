@@ -7,8 +7,8 @@ import org.apache.commons.configuration.XMLConfiguration;
 
 public class YtdConfigManager implements IConfiguration {
 
-	private static final String MPGBUTTON_PROPERTY = "mpgbutton";
-	private static final String VIDEOBUTTON_PROPERTY = "videobutton";
+	private static final String VIDEOQUALITY_PROPERTY = "videoquality";
+	private static final String VIDEORESOLUTION_PROPERTY = "videoresolution";
 	private static final String TARGET_FOLDER_PROPERTY = "targetfolder";
 	private static final String HTTP_PROXY_PROPERTY = "http_proxy";
 	private static final String SAVEFOLDER_PROPERTY = "savefolder";
@@ -43,18 +43,14 @@ public class YtdConfigManager implements IConfiguration {
 	public String getSaveDirectoryPath() {
 		return mXmlConfig.getString(SAVEFOLDER_PROPERTY);
 	}
-
-	@Override
-	public void setSaveDirectory(String pSaveDirectoryPath) {
-		mXmlConfig.setProperty(SAVEFOLDER_PROPERTY, pSaveDirectoryPath);
-	}
 	
 	@Override
-	public void saveConfiguration(String pProxy, int pDownloadSelectedState, Boolean pMpegState){
+	public void saveConfiguration(String pSaveDirectoryPath, String pProxy, String pVideoResolution, String pVideoQuality){
 		mXmlConfig.setProperty(HTTP_PROXY_PROPERTY, pProxy);
 		mXmlConfig.setProperty(TARGET_FOLDER_PROPERTY, getSaveDirectoryPath() );
-		mXmlConfig.setProperty(VIDEOBUTTON_PROPERTY, pDownloadSelectedState);
-		mXmlConfig.setProperty(MPGBUTTON_PROPERTY, pMpegState);
+		mXmlConfig.setProperty(VIDEORESOLUTION_PROPERTY, pVideoResolution);
+		mXmlConfig.setProperty(VIDEOQUALITY_PROPERTY, pVideoQuality);
+		mXmlConfig.setProperty(SAVEFOLDER_PROPERTY, pSaveDirectoryPath);
 		try {
 			mXmlConfig.save();
 		} catch (ConfigurationException e) {

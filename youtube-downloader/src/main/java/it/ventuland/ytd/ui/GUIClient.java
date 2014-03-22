@@ -22,6 +22,7 @@ import it.ventuland.ytd.config.YtdConfigManager;
 import it.ventuland.ytd.event.DownloadEvent;
 import it.ventuland.ytd.event.DownloaderListener;
 import it.ventuland.ytd.utils.URLUtils;
+import it.ventuland.ytd.utils.UrlConverter;
 
 import java.awt.Container;
 import java.awt.Dimension;
@@ -48,11 +49,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.util.Enumeration;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import javax.swing.AbstractButton;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
@@ -85,10 +84,10 @@ public class GUIClient extends JFrame {
 
 	// more or less (internal) output
 	// set to True or add 'd' after mod-time
-	private static boolean mIsDebug = false;
+	private boolean mIsDebug = false;
 
 	// just report file size of HTTP header - don't download binary data (the video)
-	private static boolean bNODOWNLOAD = mIsDebug;
+	private boolean mNoDowload = mIsDebug;
 
 	// save diskspace - try to download e.g. 720p before 1080p if HD is set
 	public static boolean bSaveDiskSpace = false;
@@ -106,8 +105,6 @@ public class GUIClient extends JFrame {
 	// all characters that do not belong to an HTTP URL - could be written shorter?? (where did I use this?? dont now anymore)
 	final String snotsourcecodeurl = "[^(a-z)^(A-Z)^(0-9)^%^&^=^\\.^:^/^\\?^_^-]";
 
-	private static Boolean bQuitrequested = false;
-
 	JPanel panel = null;
 	JSplitPane middlepane = null;
 	static JTextArea textarea = null;
@@ -117,78 +114,23 @@ public class GUIClient extends JFrame {
 	JTextField directorytextfield = null;
 	static JTextField textinputfield = null;
 	
-	static ButtonGroup mVideoResolutionBtnGrp;
-	static ButtonGroup mVideoFormatBtnGrp;
-	static JCheckBox save3dcheckbox = null;
+	ButtonGroup mVideoResolutionBtnGrp;
+	ButtonGroup mVideoQualityBtnGrp;
+	JCheckBox save3dcheckbox = null;
 	
 	JCheckBox saveconfigcheckbox = null;
 
 	private DefaultListModel<String> dlm = null;
 	private UrlList mUrlQueue = null;
 	private DownloaderStub downloadExecutor = null;
-	private Configuration mAppConfig = null;
-	private IConfiguration mConfiguration = null;
+	private Configuration mAppContext = null;
+	private IConfiguration mSavedConfiguration = null;
 
-	public static synchronized Boolean getbQuitrequested() {
-		return bQuitrequested;
-	}
+	private String mSaveDirPath;
 
 	public static synchronized String getProxy() {
 		return sproxy;
 	}
-
-	public synchronized static void setbQuitrequested(Boolean bQuitrequested) {
-		GUIClient.bQuitrequested = bQuitrequested;
-	}
-
-	/**
-	 * get state of downloadbutton as Integer 
-	 * 
-	 * @return
-	 */
-	public synchronized static Integer getIdlbuttonstate() {
-		int a = isButtonSelected("hd")? 4 : 0;
-		int b = isButtonSelected("std")? 2 : 0;
-		int c = isButtonSelected("ld")? 1 : 0;
-		return Integer.valueOf(a+b+c);
-	}
-
-
-	/**
-	 * get state of formatbutton for mpg as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBmpgbuttonstate() {
-		return isButtonSelected("mpeg");
-	}
-
-	/**
-	 * get state of formatbutton for flv as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBflvbuttonstate() {
-		return isButtonSelected("flv");
-	}
-
-	/**
-	 * get state of formatbutton for webm as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean getBwebmbuttonstate() {
-		return isButtonSelected("webm");
-	}
-
-	/**
-	 * get state of 3dbutton as Boolean 
-	 * 
-	 * @return
-	 */
-	public synchronized static Boolean get3Dbuttonstate() {
-		return (save3dcheckbox.isSelected()); 
-	}	
 
 	/**
 	 * append text to textarea
@@ -203,21 +145,9 @@ public class GUIClient extends JFrame {
 		}catch (Exception e) {
 		}
 	}
-
-	static synchronized void setbNODOWNLOAD( boolean pBNODOWNLOAD ) {
-		bNODOWNLOAD = pBNODOWNLOAD;
-	}
-
-	public static synchronized boolean getbNODOWNLOAD() {
-		// no download if we debug
-		try {
-			return(bNODOWNLOAD);
-		} catch (NullPointerException npe) {
-			return(mIsDebug);
-		}
-	}
-
-	private static Boolean isButtonSelected(String pButtonName){
+/*
+	private Boolean isButtonSelected(String pButtonName){
+		
 		Enumeration<AbstractButton> e = mVideoResolutionBtnGrp.getElements();
 		boolean lbRet = false;
 		while(e.hasMoreElements()){
@@ -230,27 +160,45 @@ public class GUIClient extends JFrame {
 		}
 		return Boolean.valueOf(lbRet);
 	}
+*/
+	private String getResolutionSelected(){
+		String lName = null;
+		Object[] lSelection = mVideoResolutionBtnGrp.getSelection().getSelectedObjects();
+		if(lSelection != null && lSelection.length>0){
+			JRadioButton lRb =(JRadioButton) lSelection[0];
+			lName = lRb.getName();
+		}
+		return lName;
+	}
+	
+	private String getFormatSelected(){
+		String lName = null;
+		Object[] lSelection = mVideoQualityBtnGrp.getSelection().getSelectedObjects();
+		if(lSelection != null && lSelection.length>0){
+			JRadioButton lRb =(JRadioButton) lSelection[0];
+			lName = lRb.getName();
+		}
+		return lName;
+	}
 	
 	private void addYTURLToList( String sname ) {
-		String sn = sname;
-		// bring all URLs into the same form
-		if (sname.toLowerCase().startsWith("youtube")) {
-			sn = "http://www.".concat(sname);
-		}
-		if (sname.toLowerCase().startsWith("www")) {
-			sn = "http://".concat(sname);
-		}
-		synchronized (dlm) {
-			dlm.addElement( sn );
-		}
 		try {
-			mUrlQueue.setElement(sn);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
+			String sn = UrlConverter.getInstance().execute(sname);
+			synchronized (dlm) {
+				dlm.addElement( sn );
+			}
+			VideoElement lElem = new VideoElement();
+			lElem.videoUrl = sn;
+			lElem.videoQuality = getResolutionSelected();
+			lElem.videoFormat = getFormatSelected();
+			lElem.is3D = save3dcheckbox.isSelected();
+			mUrlQueue.setElement( lElem );
+		} catch (Exception e1) {
+			e1.printStackTrace();
 		}
 	}
 
-	private void exchangeYTURLInList( String sfromname, String stoname) {
+	private void renameUrlInList( String sfromname, String stoname) {
 		synchronized (dlm) {
 			try {
 				int i = dlm.indexOf( sfromname );
@@ -295,10 +243,10 @@ public class GUIClient extends JFrame {
 
 	protected void initialize(Configuration pConfig) {
 
-		mConfiguration = YtdConfigManager.getInstance();
-		mAppConfig = pConfig;
+		mSavedConfiguration = YtdConfigManager.getInstance();
+		mAppContext = pConfig;
 		
-		mIsDebug = mAppConfig.getBoolean("youtube-downloader.debug", false);
+		mIsDebug = mAppContext.getBoolean("youtube-downloader.debug", false);
 		
 		Runtime.getRuntime().addShutdownHook(new Thread() {
 			@Override
@@ -329,9 +277,8 @@ public class GUIClient extends JFrame {
 	
 	private void shutdown() {
 		if (saveconfigcheckbox.isSelected()) {
-			mConfiguration.saveConfiguration(sproxy, getIdlbuttonstate(), getBmpgbuttonstate());
+			mSavedConfiguration.saveConfiguration(mSaveDirPath, sproxy, getResolutionSelected(), getFormatSelected());
 		}
-		GUIClient.setbQuitrequested(true);
 		downloadExecutor.killAll();
 		this.dispose();
 	} 
@@ -341,9 +288,9 @@ public class GUIClient extends JFrame {
 	 * invoked from the event dispatch thread.
 	 */
 	private void initializeUI() {
-		String lAppName = mAppConfig.getString("youtube-downloader.name");
-		String lAppVersion = mAppConfig.getString("youtube-downloader.version");
-		String lAppUrl = mAppConfig.getString("youtube-downloader.url");
+		String lAppName = mAppContext.getString("youtube-downloader.name");
+		String lAppVersion = mAppContext.getString("youtube-downloader.version");
+		String lAppUrl = mAppContext.getString("youtube-downloader.url");
 		String sv = lAppName.concat(" ").concat(lAppVersion).concat(" ").concat(lAppUrl);
 		
 		setDefaultLookAndFeelDecorated(false);
@@ -360,18 +307,14 @@ public class GUIClient extends JFrame {
 		if (sproxy==null) {
 			sproxy="";
 		}
-		sv = "HTTP Proxy: ".concat(sproxy);
-
-		sv = "initial download folder: ";
-		sv = sv.concat(directorytextfield.getText());
-		mConfiguration.setSaveDirectory(directorytextfield.getText());
+		mSaveDirPath = directorytextfield.getText();
 	}
 
 	private void initializeThreads(){
 		// lets respect the upload limit of google (youtube)
 		// downloading is faster than viewing anyway so don't start more than six threads and don't play around with the URL-strings please!!!
 		mUrlQueue = new UrlList();
-		downloadExecutor = new DownloaderStub(mUrlQueue,  new DnlListener(), mIsDebug);
+		downloadExecutor = new DownloaderStub(mUrlQueue,  new DnlListener(), mIsDebug, mNoDowload);
 		downloadExecutor.startAll();
 	}
 
@@ -450,14 +393,15 @@ public class GUIClient extends JFrame {
 		// radio buttons for resolution to download
 		mVideoResolutionBtnGrp = new ButtonGroup();
 		JPanel lRadioPanel = new JPanel(new GridLayout(1,0));
-		List<Object> lVidQ = mAppConfig.getList("youtube-downloader.video-quality");
+		List<Object> lVidQ = mAppContext.getList("youtube-downloader.video-quality");
 		JRadioButton lRadioButton = null;
 		for (Object obj : lVidQ) {
 			String lQuality = (String) obj;
-			String lToolTip = mAppConfig.getString("youtube-downloader.video-quality."+lQuality+".tooltip");
-			boolean lSelected = mAppConfig.getBoolean("youtube-downloader.video-quality."+lQuality+".selected");
-			boolean lEnabled = mAppConfig.getBoolean("youtube-downloader.video-quality."+lQuality+".enabled");
+			String lToolTip = mAppContext.getString("youtube-downloader.video-quality."+lQuality+".tooltip");
+			boolean lSelected = mAppContext.getBoolean("youtube-downloader.video-quality."+lQuality+".selected");
+			boolean lEnabled = mAppContext.getBoolean("youtube-downloader.video-quality."+lQuality+".enabled");
 			lRadioButton = new JRadioButton(lQuality);
+			lRadioButton.setName(lQuality);
 			lRadioButton.setActionCommand(lQuality.toLowerCase());
 			lRadioButton.addActionListener(lActionManager); 
 			lRadioButton.setToolTipText(lToolTip);
@@ -476,27 +420,28 @@ public class GUIClient extends JFrame {
 		this.panel.add( lRadioPanel, gbc );
 
 		// radio buttons for video format to download
-		mVideoFormatBtnGrp = new ButtonGroup();
+		mVideoQualityBtnGrp = new ButtonGroup();
 		lRadioPanel = new JPanel(new GridLayout(1,0));
 		save3dcheckbox = new JCheckBox("3D");
 		save3dcheckbox.setToolTipText("stereoscopic video");
 		save3dcheckbox.setSelected(false);
 		save3dcheckbox.setEnabled(true);
 		lRadioPanel.add(save3dcheckbox);
-		List<Object> lVidR = mAppConfig.getList("youtube-downloader.video-resolution");
+		List<Object> lVidR = mAppContext.getList("youtube-downloader.video-resolution");
 		lRadioButton = null;
 		for (Object obj : lVidR) {
-			String lQuality = (String) obj;
-			String lToolTip = mAppConfig.getString("youtube-downloader.video-resolution."+lQuality+".tooltip");
-			boolean lSelected = mAppConfig.getBoolean("youtube-downloader.video-resolution."+lQuality+".selected");
-			boolean lEnabled = mAppConfig.getBoolean("youtube-downloader.video-resolution."+lQuality+".enabled");
-			lRadioButton = new JRadioButton(lQuality);
-			lRadioButton.setActionCommand(lQuality.toLowerCase());
+			String lResolution = (String) obj;
+			String lToolTip = mAppContext.getString("youtube-downloader.video-resolution."+lResolution+".tooltip");
+			boolean lSelected = mAppContext.getBoolean("youtube-downloader.video-resolution."+lResolution+".selected");
+			boolean lEnabled = mAppContext.getBoolean("youtube-downloader.video-resolution."+lResolution+".enabled");
+			lRadioButton = new JRadioButton(lResolution);
+			lRadioButton.setName(lResolution);
+			lRadioButton.setActionCommand(lResolution.toLowerCase());
 			lRadioButton.addActionListener(lActionManager); 
 			lRadioButton.setToolTipText(lToolTip);
 			lRadioButton.setSelected(lSelected);
 			lRadioButton.setEnabled(lEnabled);
-			mVideoFormatBtnGrp.add(lRadioButton);
+			mVideoQualityBtnGrp.add(lRadioButton);
 			lRadioPanel.add(lRadioButton);
 		}
 
@@ -611,9 +556,9 @@ public class GUIClient extends JFrame {
 				if (ftest.exists()) {
 					if (ftest.isDirectory()) {
 						synchronized (directorytextfield) {
+							GUIClient.this.mSaveDirPath = snewdirectory;
 							directorytextfield.setText( snewdirectory );
 						}
-						mConfiguration.setSaveDirectory(snewdirectory);
 					} 
 				}
 				return;
@@ -625,7 +570,7 @@ public class GUIClient extends JFrame {
 			}
 			
 			// let the user choose another video format
-			if (e.getActionCommand().equals(mVideoFormatBtnGrp.getSelection().getActionCommand()) ) {
+			if (e.getActionCommand().equals(mVideoQualityBtnGrp.getSelection().getActionCommand()) ) {
 				return;
 			} 
 
@@ -790,39 +735,44 @@ public class GUIClient extends JFrame {
 		@Override
 		public void downloadStarted(DownloadEvent e) {
 			sOldURL = e.getStatus().toString().concat(" ").concat(e.getVideoUrl());
-			GUIClient.this.exchangeYTURLInList(e.getVideoUrl(), sOldURL);
+			GUIClient.this.renameUrlInList(e.getVideoUrl(), sOldURL);
 		}
 
 		@Override
 		public void downloadProgress(DownloadEvent e) {
 			String sNewURL = e.getStatus().toString().concat("(").concat(Long.toString(e.getCompletePerc()).concat(" %) ").concat(e.getVideoUrl()));
-			GUIClient.this.exchangeYTURLInList(sOldURL, sNewURL);
+			GUIClient.this.renameUrlInList(sOldURL, sNewURL);
 			sOldURL = sNewURL;
 		}
 
 		@Override
 		public void downloadCompleted(DownloadEvent e) {
 			String sNewURL = e.getStatus().toString().concat("(").concat(Long.toString(e.getCompletePerc()).concat(" %) ").concat(e.getVideoUrl()));
-			GUIClient.this.exchangeYTURLInList(sOldURL, sNewURL);
+			GUIClient.this.renameUrlInList(sOldURL, sNewURL);
 			//GUIClient.this.removeURLFromList(GUIClient.szDLSTATE.concat(e.getVideoUrl()));
 		}
 
 		@Override
 		public void downloadFailure(DownloadEvent e) {
 			String sNewURL = e.getStatus().toString().concat(e.getVideoUrl());
-			GUIClient.this.exchangeYTURLInList(sOldURL, sNewURL);
+			GUIClient.this.renameUrlInList(sOldURL, sNewURL);
 			//GUIClient.this.removeURLFromList(GUIClient.szDLSTATE.concat(e.getVideoUrl()));
 		}
 
 		@Override
 		public void downloadCompletedNotDownloaded(DownloadEvent e) {
 			String sNewURL = e.getStatus().toString().concat(sOldURL);
-			GUIClient.this.exchangeYTURLInList(sOldURL, sNewURL);
+			GUIClient.this.renameUrlInList(sOldURL, sNewURL);
 			//GUIClient.this.removeURLFromList(GUIClient.szDLSTATE.concat(e.getVideoUrl()));
 		}
 
 		@Override
 		public void threadIdle(DownloadEvent e) {
+			
+		}
+
+		@Override
+		public void threadAborted(DownloadEvent e) {
 			
 		}
 		

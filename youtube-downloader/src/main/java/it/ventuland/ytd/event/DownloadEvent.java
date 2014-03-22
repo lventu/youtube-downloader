@@ -7,7 +7,7 @@ import java.util.EventObject;
 public class DownloadEvent extends EventObject {
 	
 	public enum DOWNLOAD_STATUS{
-		STARTED, COMPLETED, COMPLETED_NOT_DOWNLOAD, FAILED, DOWNLOADING, IDLE;
+		STARTED, COMPLETED, COMPLETED_NOT_DOWNLOAD, FAILED, DOWNLOADING, IDLE, ABORTING;
 		
 		@Override
 		public String toString() {

@@ -24,6 +24,7 @@ import it.ventuland.ytd.httpclient.IYtdResponse;
 import it.ventuland.ytd.httpclient.YTDHttpConfig;
 import it.ventuland.ytd.ui.GUIClient;
 import it.ventuland.ytd.ui.UrlList;
+import it.ventuland.ytd.ui.VideoElement;
 import it.ventuland.ytd.utils.UTF8Utils;
 
 import java.io.BufferedInputStream;
@@ -55,7 +56,7 @@ public class YTDownloadThread extends Thread {
 
 	int iThreadNo = YTDownloadThread.iThreadcount++; // every download thread get its own number
 
-	boolean bNODOWNLOAD;
+	boolean mForceNoDownload;
 	final String ssourcecodeurl = "http://";
 	final String ssourcecodeuri = "[a-zA-Z0-9%&=\\.]";
 
@@ -66,7 +67,7 @@ public class YTDownloadThread extends Thread {
 	Vector<YTUrl> vNextVideoURL = new Vector<YTUrl>(); // list of URLs from webpage source
 	private UrlList mUrlList = null;
 	String sFileName = null; // contains the absolute filename
-	boolean bisinterrupted = false; // basically the same as Thread.isInterrupted()
+	//boolean bisinterrupted = false; // basically the same as Thread.isInterrupted()
 	int iRecursionCount = -1; // counted in downloadone() for the 3 webrequest to one video
 
 	String sContentType = null;
@@ -75,10 +76,11 @@ public class YTDownloadThread extends Thread {
 	
 	private ArrayList<DownloaderListener> mDnlListenerList = new ArrayList<DownloaderListener>();
 	
-	public YTDownloadThread(UrlList pUrlsList, boolean pIsDebug) {
+	public YTDownloadThread(YTDownloadThreadData pSetupData) {
 		super();
-		mUrlList = pUrlsList;
-		isDebug = pIsDebug;
+		mUrlList = pSetupData.videoElementQueue;
+		isDebug = pSetupData.isDebug;
+		mForceNoDownload = pSetupData.forceNoDowload;
 		String sv = "thread started: ".concat(this.getMyName());
 		debugoutput(sv);
 	}
@@ -91,15 +93,16 @@ public class YTDownloadThread extends Thread {
 	
 	/**
 	 * Recursive function that perform video download
-	 * @param sURL the video url
+	 * @param pVideo the video url
 	 * @return true if all ok, false otherwise
 	 */
-	private boolean downloadone(String sURL) {
+	private boolean downloadone(String pUrl, VideoElement pVideo) {
 		BufferedReader textreader = null;
 		BufferedInputStream binaryreader = null;
 		YTDHttpConfig httpclient = null;
 		boolean rc = false;
 		// stop recursion
+		String sURL = pUrl;
 		try {
 			if (sURL.equals("")) {
 				return (false);
@@ -107,7 +110,7 @@ public class YTDownloadThread extends Thread {
 		} catch (NullPointerException npe) {
 			return (false);
 		}
-		if (GUIClient.getbQuitrequested()) {
+		if (isWorkerInterrupted()) {
 			return (false); // try to get information about application shutdown
 		}
 		try{
@@ -136,7 +139,7 @@ public class YTDownloadThread extends Thread {
 			}
 			if (rc204) {
 				debugoutput("last response code==204 - download: ".concat(this.vNextVideoURL.get(0).getsYTID()));
-				rc = downloadone(this.vNextVideoURL.get(0).getsURL());
+				rc = downloadone(this.vNextVideoURL.get(0).getsURL(), pVideo);
 				return (rc);
 			}
 			if (rc302) {
@@ -148,10 +151,10 @@ public class YTDownloadThread extends Thread {
 			if(lResponseStream != null){
 				if (this.sContentType.matches("^text/html(.*)")) {
 					textreader = new BufferedReader(new InputStreamReader(lResponseStream));
-					rc = savetextdata(textreader, iRecursionCount);
+					rc = savetextdata(textreader, iRecursionCount, pVideo);
 				} else if (this.sContentType.matches("video/(.)*")) {
 					binaryreader = new BufferedInputStream(lResponseStream);
-					if (GUIClient.getbNODOWNLOAD()) {
+					if (mForceNoDownload) {
 						reportheaderinfo(response.getNativeResponse());
 					} else {
 						Long lByteMax = Long.parseLong(response.getFirstHeaderValue("Content-Length"));
@@ -182,7 +185,7 @@ public class YTDownloadThread extends Thread {
 			} else {
 				// enter recursion - download video resource
 				debugoutput("try to download video from URL: ".concat(this.sVideoURL));
-				rc = downloadone(this.sVideoURL);
+				rc = downloadone(this.sVideoURL, pVideo);
 			}
 			this.sVideoURL = null;
 			
@@ -232,16 +235,16 @@ public class YTDownloadThread extends Thread {
 			output("some HTTP header fields:");
 			output("content-type: ".concat(response.getFirstHeader("Content-Type").getValue()));
 			output("content-length: ".concat(iFileSize.toString()).concat(" Bytes").concat(" ~ ").concat(Long.toString((iFileSize / 1024)).concat(" KiB")).concat(" ~ ").concat(Long.toString((iFileSize / 1024 / 1024)).concat(" MiB")));
-			if (GUIClient.getbNODOWNLOAD()) {
+			if (mForceNoDownload) {
 				output(("filename would be: ").concat(this.getTitle().concat(".").concat(response.getFirstHeader("Content-Type").getValue().replaceFirst("video/", "").replaceAll("x-", "")))); // title contains just filename, no path
 			}
 		}
 	}
 
-	private int addMPEG_HD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addMPEG_HD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 		// try 3D HD first if 3D is selected
-		if (GUIClient.get3Dbuttonstate()) {
+		if (pVideo.is3D) {
 			this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("84"), this.sURL, "3D")); // mpeg 3D full HD
 		}
 
@@ -256,10 +259,10 @@ public class YTDownloadThread extends Thread {
 		return inewiindex;
 	}
 
-	private int addWBEM_HD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addWBEM_HD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 		// try 3D HD first if 3D is selected
-		if (GUIClient.get3Dbuttonstate()) {
+		if (pVideo.is3D) {
 			this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("100"), this.sURL, "3D")); // webm 3D HD
 		}
 
@@ -273,10 +276,10 @@ public class YTDownloadThread extends Thread {
 		return inewiindex;
 	}
 
-	private int addWBEM_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addWBEM_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 		// try 3D first if 3D is selected
-		if (GUIClient.get3Dbuttonstate()) {
+		if (pVideo.is3D) {
 			this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("102"), this.sURL, "3D")); // webm 3D SD
 		}
 
@@ -290,7 +293,7 @@ public class YTDownloadThread extends Thread {
 		return inewiindex;
 	}
 
-	private int addFLV_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addFLV_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 
 		if (!GUIClient.bSaveDiskSpace) {
@@ -303,11 +306,11 @@ public class YTDownloadThread extends Thread {
 		return inewiindex;
 	}
 
-	private int addMPEG_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addMPEG_SD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls , VideoElement pVideo) {
 		int inewiindex = iindex;
 
 		// try 3D first if 3D is selected
-		if (GUIClient.get3Dbuttonstate()) {
+		if (pVideo.is3D) {
 			this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("82"), this.sURL, "3D")); // mpeg 3D SD
 		}
 
@@ -315,21 +318,21 @@ public class YTDownloadThread extends Thread {
 		return inewiindex;
 	}
 
-	private int addMPEG_LD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addMPEG_LD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 		this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("36"), this.sURL)); // mpeg LD
 		this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("17"), this.sURL)); // mpeg LD
 		return inewiindex;
 	}
 
-	private int addFLV_LD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls) {
+	private int addFLV_LD_Urls(int iindex, HashMap<String, String> ssourcecodevideourls, VideoElement pVideo) {
 		int inewiindex = iindex;
 
 		this.vNextVideoURL.add(inewiindex++, new YTUrl(ssourcecodevideourls.get("5"), this.sURL)); // flv LD
 		return inewiindex;
 	}
 
-	boolean savetextdata(BufferedReader textreader, int iRecursionCount) throws IOException {
+	boolean savetextdata(BufferedReader textreader, int iRecursionCount, VideoElement pVideo) throws IOException {
 		boolean rc = false;
 		// read html lines one by one and search for java script array of video URLs
 		String sline = "";
@@ -406,59 +409,59 @@ public class YTDownloadThread extends Thread {
 
 					debugoutput("ssourcecodevideourls.length: ".concat(Integer.toString(ssourcecodevideourls.size())));
 					// figure out what resolution-button is pressed now and fill list with possible URLs
-					switch (GUIClient.getIdlbuttonstate()) {
-					case 4: // HD
+					
+					
+					switch (pVideo.videoQuality) {
+					case "HD": // HD
 						// try 1080p/720p in selected format first. if it's not available than the other format will be used
-						if (GUIClient.getBmpgbuttonstate()) {
-							iindex = addMPEG_HD_Urls(iindex, ssourcecodevideourls);
+						if ( "MPEG".equals(pVideo.videoFormat)) {
+							iindex = addMPEG_HD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
-						if (GUIClient.getBwebmbuttonstate()) {
-							iindex = addWBEM_HD_Urls(iindex, ssourcecodevideourls);
+						if ( "WEBM".equals(pVideo.videoFormat)) {
+							iindex = addWBEM_HD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
 						// there are no FLV HD URLs for now, so at least try mpg,wbem HD then
-						iindex = addMPEG_HD_Urls(iindex, ssourcecodevideourls);
-						iindex = addWBEM_HD_Urls(iindex, ssourcecodevideourls);
+						iindex = addMPEG_HD_Urls(iindex, ssourcecodevideourls, pVideo);
+						iindex = addWBEM_HD_Urls(iindex, ssourcecodevideourls, pVideo);
 
-						//$FALL-THROUGH$
-					case 2: // SD
+					case "Std": // SD
 						// try to download desired format first, if it's not available we take the other of same res
-						if (GUIClient.getBmpgbuttonstate()) {
-							iindex = addMPEG_SD_Urls(iindex, ssourcecodevideourls);
+						if ("MPEG".equals(pVideo.videoFormat)) {
+							iindex = addMPEG_SD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
-						if (GUIClient.getBwebmbuttonstate()) {
-							iindex = addWBEM_SD_Urls(iindex, ssourcecodevideourls);
+						if ("WEBM".equals(pVideo.videoFormat)) {
+							iindex = addWBEM_SD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
-						if (GUIClient.getBflvbuttonstate()) {
-							iindex = addFLV_SD_Urls(iindex, ssourcecodevideourls);
+						if ("FLV".equals(pVideo.videoFormat)) {
+							iindex = addFLV_SD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
-						iindex = addMPEG_SD_Urls(iindex, ssourcecodevideourls);
-						iindex = addWBEM_SD_Urls(iindex, ssourcecodevideourls);
-						iindex = addFLV_SD_Urls(iindex, ssourcecodevideourls);
+						iindex = addMPEG_SD_Urls(iindex, ssourcecodevideourls, pVideo);
+						iindex = addWBEM_SD_Urls(iindex, ssourcecodevideourls, pVideo);
+						iindex = addFLV_SD_Urls(iindex, ssourcecodevideourls, pVideo);
 
-						//$FALL-THROUGH$
-					case 1: // LD
+					case "LD": // LD
 
 						// TODO this.sFilenameResPart = "(LD)"; // adding LD to filename because HD-Videos are almost already named HD (?)
-						if (GUIClient.getBmpgbuttonstate()) {
-							iindex = addMPEG_LD_Urls(iindex, ssourcecodevideourls);
+						if ("MPEG".equals(pVideo.videoFormat)) {
+							iindex = addMPEG_LD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
-						if (GUIClient.getBwebmbuttonstate()) {
+						if ("WEBM".equals(pVideo.videoFormat)) {
 							// there are no wbem LD URLs for now
 						}
 
-						if (GUIClient.getBflvbuttonstate()) {
-							iindex = addFLV_LD_Urls(iindex, ssourcecodevideourls);
+						if ("FLV".equals(pVideo.videoFormat)) {
+							iindex = addFLV_LD_Urls(iindex, ssourcecodevideourls, pVideo);
 						}
 
 						// we must ensure all (16) possible URLs get added to the list so that the list of URLs is never empty
-						iindex = addMPEG_LD_Urls(iindex, ssourcecodevideourls);
-						iindex = addFLV_LD_Urls(iindex, ssourcecodevideourls);
+						iindex = addMPEG_LD_Urls(iindex, ssourcecodevideourls, pVideo);
+						iindex = addFLV_LD_Urls(iindex, ssourcecodevideourls, pVideo);
 
 						break;
 					default:
@@ -557,7 +560,7 @@ public class YTDownloadThread extends Thread {
 			if (iBytesMax > 56 * 1024 * 1024) {
 				iblocks = 1;
 			}
-			while (!this.bisinterrupted && iBytesRead > 0) {
+			while (!isWorkerInterrupted() && iBytesRead > 0) {
 				iBytesRead = binaryreader.read(bytes);
 				iBytesReadSum += iBytesRead;
 				// drop a line every x% of the download
@@ -571,11 +574,10 @@ public class YTDownloadThread extends Thread {
 					fos.write(bytes, 0, iBytesRead);
 				} catch (IndexOutOfBoundsException ioob) {
 				}
-				this.bisinterrupted = GUIClient.getbQuitrequested(); // try to get information about application shutdown
 			}
 
 			// rename files if download was interrupted before completion of download
-			if (this.bisinterrupted && iBytesReadSum < iBytesMax) {
+			if (isWorkerInterrupted() && iBytesReadSum < iBytesMax) {
 				try {
 					// this part is especially for our M$-Windows users because of the different behavior of File.renameTo() in contrast to non-windows
 					// see http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6213298 and others
@@ -704,50 +706,53 @@ public class YTDownloadThread extends Thread {
 
 	@Override
 	public void run() {
-		boolean bDOWNLOADOK = false;
-		
-		while (!this.bisinterrupted && !Thread.interrupted()) {
+		boolean lbDownloadOk = false;
+		boolean lbRun = true;
+		while (lbRun && !isWorkerInterrupted()) {
 			try {
-				this.bisinterrupted = GUIClient.getbQuitrequested(); // if quit was pressed while this threads works it would not get the InterruptedException and therefore prevent application shutdown
-				this.sURL = mUrlList.getElement();
+				VideoElement lUrl = mUrlList.getElement();
 				
-				if(this.sURL != null){
+				if(lUrl != null){
+					sURL = lUrl.videoUrl;
 					this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.STARTED, 0, sURL, null));
-					
-					this.bNODOWNLOAD = GUIClient.getbNODOWNLOAD(); // copy ndl-state because this thread should end with a complete file (and report so) even if someone switches to no-download before this thread is finished
-	
+						
 					// download one webresource and show result
-					bDOWNLOADOK = downloadone(this.sURL);
+					lbDownloadOk = downloadone(sURL, lUrl);
 					this.iRecursionCount = -1;
-					if (bDOWNLOADOK && !this.bNODOWNLOAD) {
+					if (lbDownloadOk && !this.mForceNoDownload) {
 						output(("download complete: ").concat("\"").concat(this.getTitle()).concat("\"").concat(" to ").concat(this.getFileName()));
 						this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.COMPLETED, 0, sURL, null));
 					} else {
-						if(!bNODOWNLOAD){
+						if(!mForceNoDownload){
 							this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.FAILED, 0, sURL, null));
 						}else{
 							this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.COMPLETED_NOT_DOWNLOAD, 0, sURL, null));
 						}
 					}
+				}else{
+					this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.IDLE, 0, sURL, null));
 				}
 
 			} catch (InterruptedException e) {
-				this.bisinterrupted = true;
-			} catch (NullPointerException npe) {
-				// debugoutput("npe - nothing to download?");
-			} catch (Exception e) {
-				e.printStackTrace();
+				lbRun = false;
+			}catch(Throwable t){
+				t.printStackTrace();
+				lbRun = false;
 			}
 		}
 		debugoutput("thread ended: ".concat(this.getMyName()));
-		this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.IDLE, 0, sURL, null));
+		this.processDownloadEvent(new DownloadEvent(this, iThreadNo, DOWNLOAD_STATUS.ABORTING, 0, null, null));
 		YTDownloadThread.iThreadcount--;
 	}
 
-	
+	private boolean isWorkerInterrupted(){
+		boolean isInterrupted = isInterrupted();
+		
+		return isInterrupted;
+	}
 	
 	@SuppressWarnings("unchecked")
-	private void processDownloadEvent(DownloadEvent pSpeedEvent) {
+	private void processDownloadEvent(DownloadEvent pDnlEvent) {
 		List<DownloaderListener> lDnlListenerList;
 
 		synchronized (this) {
@@ -758,29 +763,31 @@ public class YTDownloadThread extends Thread {
 		}
 
 		for (DownloaderListener lListener : lDnlListenerList) {
-			DOWNLOAD_STATUS lStatus = pSpeedEvent.getStatus();
+			DOWNLOAD_STATUS lStatus = pDnlEvent.getStatus();
 			switch(lStatus){
 			case STARTED:
-				lListener.downloadStarted(pSpeedEvent);
+				lListener.downloadStarted(pDnlEvent);
 				output(("trying to download: ").concat(this.sURL));
 				break;
 			case DOWNLOADING:
-				lListener.downloadProgress(pSpeedEvent);
+				lListener.downloadProgress(pDnlEvent);
 				break;
 			case FAILED:
 				output(("download failed: ").concat("\"").concat(this.getTitle()).concat("\"")); // not downloaded does not mean it was erroneous
-				lListener.downloadFailure(pSpeedEvent);
+				lListener.downloadFailure(pDnlEvent);
 				break;
 			case COMPLETED:
-				lListener.downloadCompleted(pSpeedEvent);
+				lListener.downloadCompleted(pDnlEvent);
 				break;
 			case COMPLETED_NOT_DOWNLOAD:
 				output(("not downloaded: ").concat("\"").concat(this.getTitle()).concat("\"")); // not downloaded does not mean it was erroneous
-				lListener.downloadCompletedNotDownloaded(pSpeedEvent);
+				lListener.downloadCompletedNotDownloaded(pDnlEvent);
 				break;
 			case IDLE:
-				lListener.threadIdle(pSpeedEvent);
+				lListener.threadIdle(pDnlEvent);
 				break;
+			case ABORTING:
+				lListener.threadAborted(pDnlEvent);
 			default:
 				break;
 			}
